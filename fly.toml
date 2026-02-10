@@ -1,0 +1,20 @@
+app = "gem3-zoom"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[build.args]
+  GEMINI_API_KEY = ""  # Set via: fly secrets set GEMINI_API_KEY=xxx
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  memory = "512mb"
+  cpu_kind = "shared"
+  cpus = 1
