@@ -437,6 +437,14 @@ html, body {{
 .node-new {{
     animation: fadeIn 0.4s ease-out;
 }}
+@keyframes neuralPulse {{
+    0% {{ color: inherit; }}
+    30% {{ color: #111; font-weight: 700; }}
+    100% {{ color: inherit; font-weight: inherit; }}
+}}
+.node-pulse {{
+    animation: neuralPulse 1.2s ease-out forwards;
+}}
 #search-box {{
     position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
     z-index: 20000; display: flex; align-items: center; gap: 0;
@@ -1190,6 +1198,25 @@ function closeAnswer() {{
     answerPanel.classList.remove('show');
     setTimeout(() => answerPanel.style.display = 'none', 300);
 }}
+
+// neural pulse — random nodes flash to simulate network thinking
+setInterval(() => {{
+    const visible = [];
+    document.querySelectorAll('[data-node-id]').forEach(el => {{
+        if (el.style.display !== 'none' && !el.classList.contains('node-pulse')
+            && !el.classList.contains('search-active') && !el.classList.contains('search-dimmed')
+            && parseFloat(el.style.opacity || 1) > 0.3) {{
+            visible.push(el);
+        }}
+    }});
+    if (visible.length < 2) return;
+    const count = 1 + Math.floor(Math.random() * 2);
+    for (let i = 0; i < count; i++) {{
+        const el = visible[Math.floor(Math.random() * visible.length)];
+        el.classList.add('node-pulse');
+        setTimeout(() => el.classList.remove('node-pulse'), 1200);
+    }}
+}}, 2000 + Math.random() * 3000);
 
 // Init
 resetView();
