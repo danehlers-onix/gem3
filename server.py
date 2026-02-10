@@ -1230,7 +1230,7 @@ function closeAnswer() {{
     setTimeout(() => answerPanel.style.display = 'none', 300);
 }}
 
-// replay traversal — re-animate the search path
+// replay traversal — render to canvas + record as video
 let replaying = false;
 async function replayTraversal() {{
     if (replaying || searchTraversal.length === 0) return;
@@ -1239,20 +1239,140 @@ async function replayTraversal() {{
     const fill = document.getElementById('replay-fill');
     const label = document.getElementById('replay-label');
     btn.disabled = true;
-    btn.textContent = 'replaying...';
-    clearSearchHighlight();
-    // zoom out first
-    await animateTo(CW/2, CH/2, INITIAL_SCALE, 400);
+    btn.textContent = 'recording...';
+    
+    // create offscreen canvas for smooth rendering
+    const W = 640, H = 400;
+    const cvs = document.createElement('canvas');
+    cvs.width = W; cvs.height = H;
+    const ctx = cvs.getContext('2d');
+    
+    // collect all known nodes for rendering
+    const allNodes = [];
+    document.querySelectorAll('[data-node-id]').forEach(el => {{
+        allNodes.push({{
+            x: parseFloat(el.style.left) || 0,
+            y: parseFloat(el.style.top) || 0,
+            fs: parseFloat(el.style.fontSize) || 14,
+            title: el.textContent,
+            level: el.dataset.level,
+            id: el.dataset.nodeId,
+        }});
+    }});
+    
+    // start recording
+    const stream = cvs.captureStream(30);
+    const recorder = new MediaRecorder(stream, {{ mimeType: 'video/webm;codecs=vp9', videoBitsPerSecond: 2000000 }});
+    const chunks = [];
+    recorder.ondataavailable = e => {{ if (e.data.size > 0) chunks.push(e.data); }};
+    recorder.start();
+    
+    // render a frame: zoom to (cx, cy) at scale s, highlight activeId
+    function renderFrame(cx, cy, s, activeId, pathIds) {{
+        ctx.fillStyle = '#f5f5f5';
+        ctx.fillRect(0, 0, W, H);
+        ctx.save();
+        ctx.translate(W/2 - cx * s, H/2 - cy * s);
+        
+        for (const n of allNodes) {{
+            const eff = n.fs * s;
+            if (eff < 4 || eff > 160) continue;
+            const sx = n.x * s + (W/2 - cx * s);
+            const sy = n.y * s + (H/2 - cy * s);
+            if (sx < -200 || sx > W + 200 || sy < -100 || sy > H + 100) continue;
+            
+            let alpha = 1;
+            if (eff >= 14 && eff <= 30) alpha = 1;
+            else if (eff > 30) alpha = Math.max(0.08, (1 - (eff-30)/130) * 0.5);
+            else alpha = Math.max(0.08, (eff-4)/10 * 0.4);
+            
+            const col = LEVEL_COLORS[n.level] || '#666';
+            if (n.id === activeId) {{
+                ctx.globalAlpha = 1;
+                ctx.font = `900 ${{Math.max(8, eff)}}px Helvetica Neue, Arial, sans-serif`;
+                ctx.fillStyle = '#111';
+                ctx.shadowColor = 'rgba(66,133,244,0.4)';
+                ctx.shadowBlur = 6;
+            }} else if (pathIds.has(n.id)) {{
+                ctx.globalAlpha = 0.9;
+                ctx.font = `700 ${{Math.max(6, eff)}}px Helvetica Neue, Arial, sans-serif`;
+                ctx.fillStyle = '#333';
+                ctx.shadowBlur = 0;
+            }} else {{
+                ctx.globalAlpha = alpha * 0.3;
+                const g = parseInt(n.level === 'topic' ? 180 : n.level === 'subtopic' ? 150 : 120);
+                ctx.font = `400 ${{Math.max(4, eff)}}px Helvetica Neue, Arial, sans-serif`;
+                ctx.fillStyle = `rgb(${{g}},${{g}},${{g}})`;
+                ctx.shadowBlur = 0;
+            }}
+            ctx.fillText(n.title, n.x * s, n.y * s);
+        }}
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        ctx.shadowBlur = 0;
+    }}
+    
+    // animate through each step, rendering to canvas
+    const pathIds = new Set();
+    const FPS = 30;
+    const ZOOM_FRAMES = 24; // 0.8s per zoom
+    const HOLD_FRAMES = 18; // 0.6s hold
+    
+    // start from overview
+    let curX = CW/2, curY = CH/2, curS = INITIAL_SCALE * (W/innerWidth);
+    renderFrame(curX, curY, curS, '', pathIds);
+    await new Promise(r => setTimeout(r, 500));
+    
     for (let i = 0; i < searchTraversal.length; i++) {{
         const t = searchTraversal[i];
-        const zl = 0.08 + t.step * 0.3;
+        const targetS = (0.08 + t.step * 0.3) * (W/innerWidth);
+        const startX = curX, startY = curY, startS = curS;
         fill.style.width = ((i+1) / searchTraversal.length * 100) + '%';
         label.textContent = `${{i+1}} / ${{searchTraversal.length}}`;
-        await animateTo(t.x, t.y, zl, 800);
-        const nd = nodesData[t.node_id] || {{}};
-        highlightSearchNode(t.node_id, t.level, t.title, nd.summary || '', t.reasoning || '');
-        await new Promise(r => setTimeout(r, 600));
+        
+        // smooth zoom animation
+        for (let f = 0; f <= ZOOM_FRAMES; f++) {{
+            const p = f / ZOOM_FRAMES;
+            const ease = p < 0.5 ? 2*p*p : -1+(4-2*p)*p;
+            curX = startX + (t.x - startX) * ease;
+            curY = startY + (t.y - startY) * ease;
+            curS = startS + (targetS - startS) * ease;
+            renderFrame(curX, curY, curS, t.node_id, pathIds);
+            await new Promise(r => setTimeout(r, 1000/FPS));
+        }}
+        pathIds.add(t.node_id);
+        
+        // hold on this node
+        for (let f = 0; f < HOLD_FRAMES; f++) {{
+            renderFrame(curX, curY, curS, t.node_id, pathIds);
+            await new Promise(r => setTimeout(r, 1000/FPS));
+        }}
     }}
+    
+    // final hold
+    await new Promise(r => setTimeout(r, 500));
+    
+    // stop recording
+    recorder.stop();
+    await new Promise(r => {{ recorder.onstop = r; }});
+    
+    // create video element
+    const blob = new Blob(chunks, {{ type: 'video/webm' }});
+    const url = URL.createObjectURL(blob);
+    
+    // show video in answer panel
+    let vid = document.getElementById('replay-video');
+    if (!vid) {{
+        vid = document.createElement('video');
+        vid.id = 'replay-video';
+        vid.style.cssText = 'width:100%;max-height:300px;border-radius:8px;margin-top:8px;background:#111;';
+        vid.controls = true;
+        vid.autoplay = true;
+        document.getElementById('replay-bar').after(vid);
+    }}
+    vid.src = url;
+    vid.play();
+    
     btn.disabled = false;
     btn.textContent = 'replay traversal';
     replaying = false;
