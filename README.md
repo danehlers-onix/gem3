@@ -1,145 +1,54 @@
-# 🌌 gem3 — Visual RAG: Infinite Zoom Knowledge Navigation
+# infiniteZoom RAG
 
-> No embeddings. No keywords. Pure vision.
+infinite zoom knowledge graph powered by gemini. start from big topics, zoom in to discover subtopics, chapters, concepts, and facts — all generated on the fly. search navigates the graph live with a rendered video of the traversal.
 
-A novel retrieval-augmented generation system that uses **Gemini Flash's image understanding** to create a visual, infinite-zoom approach to knowledge retrieval. Ingest your documents, zoom from topics down to source excerpts, and host it publicly — all from a single codebase.
+**live:** https://gem3-zoom-51139704820.us-east5.run.app
 
-## ⚡ Quick Start
+## inspiration
+
+we kept running into the same problem — you search for something, get a flat list of links, and lose all sense of how things connect. knowledge has structure. it has depth. we wanted to see that depth, literally zoom into it the way you'd zoom into a map. the idea was simple: what if you could start from "Science" and just keep zooming until you hit actual facts?
+
+## what it does
+
+infiniteZoom is a knowledge graph you navigate by zooming. it starts with big topics rendered as huge faded text on a canvas. zoom in and they expand — gemini generates subtopics, chapters, sections, concepts, all the way down to individual facts. there's a search that actually traverses the graph live — you watch it zoom through layers picking the most relevant path, then it gives you an answer with a rendered video of the traversal you can replay. the whole thing runs on a single python server with no frontend framework.
+
+## how we built it
+
+pure python backend with aiohttp serving a single HTML page. the canvas is just absolutely positioned spans with CSS transforms for zoom/pan — no canvas element, no WebGL, just DOM. gemini 3 flash generates children for each node when you zoom in far enough. search uses server-sent events to stream each step back to the browser while speculatively expanding nodes in parallel. the traversal video is rendered client-side to a hidden canvas with MediaRecorder. deployed on cloud run with bigquery for persistence.
+
+## challenges we ran into
+
+bigquery streaming buffer. you can't update rows you just inserted — there's a buffer delay. we burned time trying to track expanded state in BQ before just making it in-memory only. also batch expanding multiple nodes in one gemini call took some prompt engineering to get reliable JSON back. and making the zoom feel smooth with thousands of DOM nodes required aggressive LOD culling — only 3-4 layers visible at any time.
+
+## accomplishments that we're proud of
+
+the speculative expansion during search. while gemini picks which node to follow, we're already expanding ALL candidate nodes in parallel. so by the time it decides, the children are already there. zero wait. also the video replay — it renders the entire traversal to a canvas at 30fps and shows it next to the answer automatically. no libraries, no ffmpeg, just browser APIs.
+
+## what we learned
+
+you don't need react. you don't need a graph library. a few hundred lines of vanilla JS with CSS transforms can do infinite zoom with LOD rendering. also gemini 3 flash is fast enough to generate knowledge nodes on the fly without it feeling slow — the speculative parallelism helps a lot.
+
+## what's next
+
+grounded mode — we have the code for it already. ingest actual documents, build the tree from real content, and ground the leaf nodes in source text. so when you zoom all the way in you're reading actual excerpts from papers or docs, not generated text. also want to add collaborative graphs where multiple people explore the same canvas and see each other's paths.
+
+## run locally
 
 ```bash
 pip install -r requirements.txt
-export GEMINI_API_KEY="your-key-here"
-
-# Build knowledge tree from demo docs (one-time Gemini call)
-python main.py demo
-
-# Launch interactive zoom server
-python main.py rag
-# → Open http://localhost:3333
+python main.py
 ```
 
-## How It Works
-
-Documents are ingested into a **hierarchical knowledge tree** — from library → topics → subtopics → chapters → sections → concepts → **verbatim source excerpts**. The hierarchy is rendered as a single zoomable canvas where text size reflects depth:
-
-```
-🔤 HUGE FAINT TEXT     = broad topics (visible at overview)
-  🔤 Medium text       = subtopics & chapters
-    🔤 small dark text  = concepts & source excerpts (visible when zoomed)
-```
-
-Zooming in reveals deeper layers. Parent text **automatically fades** as you zoom, keeping the view clean. Query-relevant paths are **highlighted** (darkened/bolded) to guide navigation.
-
-## Commands
-
-| Command | What it does |
-|---------|-------------|
-| `python main.py rag` | Launch grounded zoom server (pre-built tree) |
-| `python main.py search "query"` | Visual agent search → MP4 animation + explainability |
-| `python main.py export` | Export standalone HTML (host anywhere, zero cost) |
-| `python main.py export "query"` | Export with query highlighting baked in |
-| `python main.py zoom` | Launch infinite generative zoom (Gemini generates on-the-fly) |
-| `python main.py ingest ./docs/` | Ingest your own documents |
-| `python main.py demo` | Build knowledge tree from sample science articles |
-
-## 🚀 Public Hosting
-
-The grounded zoom mode is **100% client-side** after page load — no API key needed at runtime, no server computation during zoom. This means multiple zero-cost hosting options:
-
-### Option 1: Static HTML Export (Simplest)
+## deploy
 
 ```bash
-# Export a single self-contained HTML file
-python main.py export
-
-# With a pre-baked query
-python main.py export "quantum entanglement"
-
-# Output: output/gem3_export.html (~50-200KB)
-# Host on: GitHub Pages, Netlify, Vercel, S3, or just share the file
+gcloud run deploy gem3-zoom --source . --project YOUR_PROJECT --region us-east5
 ```
 
-### Option 2: Fly.io (Free Tier)
+## stack
 
-```bash
-chmod +x deploy.sh
-./deploy.sh fly
-# → Deploys to https://gem3-zoom.fly.dev
-```
-
-### Option 3: Google Cloud Run
-
-```bash
-./deploy.sh cloudrun
-# → Deploys to https://gem3-zoom-xxxxx.run.app
-```
-
-### Option 4: Docker
-
-```bash
-./deploy.sh docker
-# → Runs on http://localhost:8080
-```
-
-### Option 5: GitHub Pages (Free)
-
-```bash
-python main.py export
-# Copy output/gem3_export.html → docs/index.html
-# Push to GitHub → Settings → Pages → Deploy from docs/
-```
-
-## 🔍 Visual Search Agent
-
-The `search` command launches a Gemini-powered agent that **sees** the canvas and visually navigates to answer queries:
-
-```bash
-python main.py search "how does quantum cryptography work"
-```
-
-This produces:
-- **MP4 animation** showing the agent's zoom path
-- **HTML explainability page** with step-by-step reasoning
-- **Screenshots** at each decision point
-
-The agent renders the canvas at each zoom level, sends the image to Gemini, gets back a zoom decision with reasoning, and repeats until source excerpts are readable.
-
-## Architecture
-
-```
-gem3/
-├── models.py        # KnowledgeNode data model
-├── config.py        # Configuration (API keys, paths)
-├── ingest.py        # Documents → hierarchical knowledge tree
-├── visual_agent.py  # Gemini vision agent (sees canvas, decides where to zoom)
-├── animate.py       # Cinematic MP4 generation of search traversal
-├── navigator.py     # Visual navigation (legacy)
-├── visualize.py     # HTML visualization (legacy)
-server.py            # aiohttp server (grounded + generative zoom modes)
-main.py              # CLI entry point
-Dockerfile           # Container deployment
-fly.toml             # Fly.io config
-deploy.sh            # One-command deployment script
-```
-
-## What Makes This Novel
-
-- **100% Visual Retrieval**: No vector embeddings — the model literally *looks* at the rendered canvas to find information
-- **Zoom-as-Retrieval**: The hierarchy IS the retrieval mechanism. Zooming traces the path from query to source.
-- **Grounded Excerpts**: Every leaf node is a real document chunk with provenance
-- **Automatic Fade**: Parent text fades as you zoom deep, keeping excerpts clean and readable
-- **Zero-Cost Hosting**: Export as a single HTML file — no server, no API key needed at runtime
-- **Explainability**: The zoom path IS the explanation. Every navigation decision is recorded and visualizable.
-
-## Ingest Your Own Documents
-
-```bash
-# From a directory of text/markdown files
-python main.py ingest ./my_documents/
-
-# Then serve or export
-python main.py rag
-python main.py export
-```
-
-Gemini analyzes your documents and builds the hierarchy automatically — deducing topics, subtopics, and organizing chunks into a navigable tree.
+- python / aiohttp
+- gemini 3 flash (via vertex ai)
+- bigquery (persistence)
+- cloud run
+- vanilla js / css transforms / MediaRecorder
