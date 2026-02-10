@@ -497,28 +497,25 @@ html, body {{
     cursor: pointer; transition: background 0.15s;
 }}
 #answer-panel .path-node:hover {{ background: #4285f4; color: white; }}
+#answer-panel .answer-body {{
+    display: flex; gap: 16px; align-items: flex-start;
+}}
+#answer-panel .answer-video {{
+    flex: 0 0 auto; border-radius: 8px; overflow: hidden;
+    background: #f5f5f5; border: 1px solid #e8e8e8;
+}}
+#answer-panel .answer-video video {{
+    display: block; width: 320px; height: 200px; object-fit: contain;
+    background: #f5f5f5; border-radius: 8px;
+}}
+#answer-panel .answer-right {{
+    flex: 1; min-width: 0;
+}}
 #answer-panel .answer-text {{ white-space: pre-wrap; color: #333; }}
 #answer-panel .meta {{ font-size: 11px; color: #aaa; margin-top: 8px; }}
-#answer-panel .replay-bar {{
-    display: flex; align-items: center; gap: 8px; margin-top: 10px;
-    padding: 6px 0; border-top: 1px solid #f0f0f0;
-}}
-#answer-panel .replay-btn {{
-    background: #4285f4; color: white; border: none; border-radius: 16px;
-    padding: 5px 14px; font-size: 12px; cursor: pointer; font-family: inherit;
-    transition: background 0.15s; white-space: nowrap;
-}}
-#answer-panel .replay-btn:hover {{ background: #3367d6; }}
-#answer-panel .replay-btn:disabled {{ background: #ccc; cursor: default; }}
-#answer-panel .replay-progress {{
-    flex: 1; height: 4px; background: #e0e0e0; border-radius: 2px; overflow: hidden;
-}}
-#answer-panel .replay-fill {{
-    height: 100%; width: 0%; background: #4285f4; border-radius: 2px;
-    transition: width 0.3s linear;
-}}
-#answer-panel .replay-label {{
-    font-size: 11px; color: #999; min-width: 60px; text-align: right;
+@media (max-width: 700px) {{
+    #answer-panel .answer-body {{ flex-direction: column; }}
+    #answer-panel .answer-video video {{ width: 100%; height: auto; }}
 }}
 #graph-stats {{
     position: fixed; bottom: 16px; left: 50%;
@@ -671,12 +668,14 @@ html, body {{
 <div id="answer-panel">
     <button class="close-btn" onclick="closeAnswer()">✕</button>
     <div class="path-bar" id="path-bar"></div>
-    <div class="answer-text" id="answer-text"></div>
-    <div class="meta" id="answer-meta"></div>
-    <div class="replay-bar" id="replay-bar" style="display:none">
-        <button class="replay-btn" id="replay-btn" onclick="replayTraversal()">replay traversal</button>
-        <div class="replay-progress"><div class="replay-fill" id="replay-fill"></div></div>
-        <span class="replay-label" id="replay-label"></span>
+    <div class="answer-body">
+        <div class="answer-video" id="answer-video-box" style="display:none">
+            <video id="replay-video" controls loop muted></video>
+        </div>
+        <div class="answer-right">
+            <div class="answer-text" id="answer-text"></div>
+            <div class="meta" id="answer-meta"></div>
+        </div>
     </div>
 </div>
 
@@ -1196,11 +1195,6 @@ function doSearch() {{
         answerPanel.style.display = 'block';
         requestAnimationFrame(() => answerPanel.classList.add('show'));
         document.getElementById('graph-stats').textContent = `${{data.total_nodes}} nodes · gemini 3 flash preview`;
-        // show replay button
-        if (searchTraversal.length > 0) {{
-            document.getElementById('replay-bar').style.display = 'flex';
-            document.getElementById('replay-label').textContent = `${{searchTraversal.length}} steps`;
-        }}
         // Traversal panel answer
         tpStatus.textContent = '';
         tpStatus.classList.remove('active');
@@ -1213,6 +1207,8 @@ function doSearch() {{
         searchBtn.disabled = false;
         tpStatus.classList.remove('active');
         setTimeout(() => {{ searchStatus.style.display = 'none'; searchStatus.className = ''; }}, 1500);
+        // auto-generate video in background
+        if (searchTraversal.length > 0) setTimeout(autoRenderVideo, 500);
     }});
     
     es.onerror = () => {{
@@ -1230,16 +1226,11 @@ function closeAnswer() {{
     setTimeout(() => answerPanel.style.display = 'none', 300);
 }}
 
-// replay traversal — render to canvas + record as video
+// auto-render traversal video after search completes
 let replaying = false;
-async function replayTraversal() {{
+async function autoRenderVideo() {{
     if (replaying || searchTraversal.length === 0) return;
     replaying = true;
-    const btn = document.getElementById('replay-btn');
-    const fill = document.getElementById('replay-fill');
-    const label = document.getElementById('replay-label');
-    btn.disabled = true;
-    btn.textContent = 'recording...';
     
     // create offscreen canvas for smooth rendering
     const W = 640, H = 400;
@@ -1327,8 +1318,6 @@ async function replayTraversal() {{
         const t = searchTraversal[i];
         const targetS = (0.08 + t.step * 0.3) * (W/innerWidth);
         const startX = curX, startY = curY, startS = curS;
-        fill.style.width = ((i+1) / searchTraversal.length * 100) + '%';
-        label.textContent = `${{i+1}} / ${{searchTraversal.length}}`;
         
         // smooth zoom animation
         for (let f = 0; f <= ZOOM_FRAMES; f++) {{
@@ -1360,21 +1349,12 @@ async function replayTraversal() {{
     const blob = new Blob(chunks, {{ type: 'video/webm' }});
     const url = URL.createObjectURL(blob);
     
-    // show video in answer panel
-    let vid = document.getElementById('replay-video');
-    if (!vid) {{
-        vid = document.createElement('video');
-        vid.id = 'replay-video';
-        vid.style.cssText = 'width:100%;max-height:300px;border-radius:8px;margin-top:8px;background:#111;';
-        vid.controls = true;
-        vid.autoplay = true;
-        document.getElementById('replay-bar').after(vid);
-    }}
+    // show video in answer panel side-by-side
+    const vid = document.getElementById('replay-video');
+    const box = document.getElementById('answer-video-box');
     vid.src = url;
+    box.style.display = '';
     vid.play();
-    
-    btn.disabled = false;
-    btn.textContent = 'replay traversal';
     replaying = false;
 }}
 
